@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>제주 관광정보 찾기</title>
+<style>
+  :root{--bg:#f6f4ef;--card:#fff;--ink:#222;--muted:#666;--line:#ddd6c8;--accent:#1f7a6b;--warn:#a8481c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;line-height:1.6}
+  header{padding:20px 16px 4px;max-width:1100px;margin:0 auto} h1{margin:0;font-size:24px} .sub{color:var(--muted);font-size:14px}
+  main{padding:8px 16px 40px;max-width:1100px;margin:0 auto}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  input,select{font:inherit;font-size:14px;padding:6px 8px;border:1px solid #ccc;border-radius:6px}
+  button{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:7px 14px;font:inherit;font-size:14px;cursor:pointer}
+  button:disabled{opacity:.5;cursor:default}
+  .badge{display:inline-block;border-radius:10px;padding:0 10px;font-size:12px;color:#fff;background:var(--accent)}
+  .badge.key{background:#7a5c1f}
+  .msg{margin-top:8px;font-size:14px} .msg.err{color:var(--warn)}
+  .table-wrap{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:14px}
+  th,td{border-bottom:1px solid var(--line);padding:6px;text-align:left;vertical-align:top}
+  th{background:#faf8f3;white-space:nowrap}
+  .small{font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>제주 관광정보 찾기</h1>
+  <div class="sub">한국관광공사 TourAPI(공공데이터포털)에서 제주 관광정보를 검색해 표로 봅니다. 이 파일에는 인증키가 들어 있지 않습니다.</div>
+</header>
+<main>
+  <div class="card">
+    <div class="row"><b>연결 방식</b> <span class="badge" id="mode"></span></div>
+    <div class="row" id="keyRow" style="margin-top:8px">
+      <label>인증키(Decoding) <input type="password" id="key" autocomplete="off" style="width:320px"></label>
+      <span class="small">입력한 키는 이 화면을 닫으면 사라지고, 어디에도 저장하지 않습니다.</span>
+    </div>
+  </div>
+  <div class="card">
+    <div class="row">
+      <input id="kw" placeholder="검색어 예: 오름, 해수욕장, 박물관" value="오름" style="width:240px">
+      <select id="type">
+        <option value="">분류 전체</option>
+        <option value="12" selected>관광지</option>
+        <option value="14">문화시설</option>
+        <option value="15">축제 · 행사</option>
+        <option value="39">음식점</option>
+      </select>
+      <button id="go">찾기</button>
+      <button id="csv" disabled>CSV 저장</button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </div>
+  <div class="card table-wrap">
+    <table><thead><tr><th>이름</th><th>주소</th><th>전화</th><th>사진</th></tr></thead><tbody id="list"><tr><td colspan="4" class="small">검색어를 넣고 찾기를 누르세요.</td></tr></tbody></table>
+  </div>
+  <div class="small">출처: 한국관광공사 국문 관광정보 서비스(TourAPI), 공공데이터포털. 조회한 날 기준이라 바뀔 수 있습니다. 교육용 화면입니다.</div>
+</main>
+<script>
+// 구글 중계(Apps Script 웹 앱) 주소. 비워 두면 화면에서 키를 입력받는 방식으로 동작합니다.
+// 중계 주소에는 키가 들어 있지 않으므로 올려도 됩니다. 키는 Apps Script의 스크립트 속성에만 둡니다.
+var RELAY_URL = "";
+
+var API_BASE = "https://apis.data.go.kr/B551011/KorService2/";
+var ROWS = [];
+var $ = function(id){ return document.getElementById(id); };
+function esc(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+
+if (RELAY_URL) { $("mode").textContent = "구글 중계 (키 입력 필요 없음)"; $("keyRow").style.display = "none"; }
+else { $("mode").textContent = "키 직접 입력"; $("mode").className = "badge key"; }
+
+function buildUrl(params){
+  var u, k;
+  if (RELAY_URL) { u = new URL(RELAY_URL); u.searchParams.set("op", "searchKeyword2"); }
+  else {
+    u = new URL(API_BASE + "searchKeyword2");
+    u.searchParams.set("serviceKey", $("key").value.trim());
+    u.searchParams.set("MobileOS", "ETC"); u.searchParams.set("MobileApp", "edu"); u.searchParams.set("_type", "json");
+  }
+  for (k in params) if (params[k]) u.searchParams.set(k, params[k]);
+  return u.toString();
+}
+
+function say(t, bad){ $("msg").textContent = t; $("msg").className = "msg" + (bad ? " err" : ""); }
+
+$("go").onclick = async function(){
+  var kw = $("kw").value.trim();
+  if (!kw) { say("검색어를 넣어 주세요.", true); return; }
+  if (!RELAY_URL && !$("key").value.trim()) { say("인증키를 넣어 주세요.", true); return; }
+  say("찾는 중...");
+  $("go").disabled = true;
+  try {
+    var r = await fetch(buildUrl({ keyword: kw, contentTypeId: $("type").value, areaCode: "39", numOfRows: "50", pageNo: "1" }));
+    var text = await r.text(), j;
+    try { j = JSON.parse(text); } catch (e) { throw new Error("공공 API가 JSON이 아닌 답을 보냈습니다. 키가 맞는지, 활용신청이 승인됐는지 확인하세요."); }
+    if (j.error) throw new Error(j.error);
+    var h = j.response && j.response.header;
+    if (h && h.resultCode && h.resultCode !== "0000") throw new Error("공공 API 오류 " + h.resultCode + " " + (h.resultMsg || ""));
+    var it = j.response && j.response.body && j.response.body.items && j.response.body.items.item;
+    ROWS = !it ? [] : (Array.isArray(it) ? it : [it]);
+    render();
+    var total = j.response.body.totalCount;
+    say("찾은 곳 " + ROWS.length + "건" + (total > ROWS.length ? " (전체 " + total + "건 중 앞 " + ROWS.length + "건)" : "") + ".");
+    $("csv").disabled = !ROWS.length;
+  } catch (e) {
+    if (/Failed to fetch|NetworkError|Load failed/.test(e.message)) {
+      say("브라우저가 공공 API의 답을 막았습니다(CORS). 키 입력 방식이 막히면 구글 중계 주소를 RELAY_URL에 넣어 쓰세요.", true);
+    } else say(e.message, true);
+  } finally { $("go").disabled = false; }
+};
+
+function render(){
+  $("list").innerHTML = ROWS.length ? ROWS.map(function(x){
+    return "<tr><td>" + esc(x.title) + "</td><td>" + esc((x.addr1 || "") + " " + (x.addr2 || "")) + "</td><td>" + esc(x.tel) + "</td><td>" +
+      (x.firstimage ? '<a href="' + esc(x.firstimage) + '" target="_blank" rel="noopener">보기</a>' : "") + "</td></tr>";
+  }).join("") : '<tr><td colspan="4" class="small">찾은 곳이 없습니다. 검색어나 분류를 바꿔 보세요.</td></tr>';
+}
+
+$("csv").onclick = function(){
+  var head = ["이름","주소","전화","사진주소","조회일","출처"], d = new Date().toISOString().slice(0,10);
+  var q = function(v){ return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; };
+  var lines = [head.join(",")].concat(ROWS.map(function(x){ return [x.title, (x.addr1||"")+" "+(x.addr2||""), x.tel, x.firstimage, d, "한국관광공사 TourAPI"].map(q).join(","); }));
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv" }));
+  a.download = "제주_관광정보_" + d + ".csv"; a.click();
+};
+$("kw").addEventListener("keydown", function(e){ if (e.key === "Enter") $("go").click(); });
+</script>
+</body>
+</html>
